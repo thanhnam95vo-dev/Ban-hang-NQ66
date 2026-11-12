@@ -143,14 +143,34 @@ function toB64(blob) {
     r.onload = () => res(r.result.split(',')[1]); r.onerror = rej; r.readAsDataURL(blob);
   });
 }
-function call(p) {
-  return new Promise((res, rej) => google.script.run.withSuccessHandler(res).withFailureHandler(rej).uploadPhoto(p));
+// Dán URL ứng dụng web của Apps Script (dạng https://script.google.com/macros/s/.../exec) vào đây:
+const API_URL = 'DAN_URL_APPS_SCRIPT_VAO_DAY';
+
+function explain(e) {
+  const m = String(e && e.message || e);
+  if (/API_URL/.test(m)) return 'Lỗi: chưa dán URL Apps Script vào index.html (API_URL).';
+  if (/Failed to fetch|NetworkError|Load failed/i.test(m)) return 'Lỗi kết nối tới Apps Script: kiểm tra URL /exec, và bản triển khai phải để "Bất kỳ ai" truy cập.';
+  if (/JSON|Unexpected token/i.test(m)) return 'Lỗi: Apps Script trả về trang đăng nhập/lỗi thay vì kết quả (chưa cấp quyền hoặc chưa triển khai bản mới).';
+  return 'Lỗi: ' + m;
+}
+
+async function call(p) {
+  if (!/^https:\/\/script\.google\.com\//.test(API_URL)) throw new Error('Chưa cấu hình API_URL');
+  const r = await fetch(API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // tránh preflight CORS
+    body: JSON.stringify(p)
+  });
+  const j = await r.json();
+  if (!j.ok) throw new Error(j.error || 'Lỗi máy chủ');
+  return j;
 }
 
 $('send').onclick = async () => {
   const phone = $('phone').value.replace(/[\s.\-]/g, '').replace(/^\+84/, '0');
   if (!/^0\d{9,10}$/.test(phone)) { show('err', 'Số thuê bao chưa đúng (10–11 chữ số, bắt đầu bằng 0).'); return; }
   $('send').disabled = true; $('msg').className = '';
+  let lastErr = '';
   const todo = items.map((it, i) => ({ it, i })).filter(x => x.it.state !== 'done');
   $('bar').style.display = 'block'; let n = 0, okc = 0;
   for (const { it, i } of todo) {
@@ -161,11 +181,11 @@ $('send').onclick = async () => {
         index: i + 1, data: await toB64(it.blob)
       });
       it.state = 'done'; okc++;
-    } catch (e) { it.state = 'fail'; }
+    } catch (e) { it.state = 'fail'; lastErr = explain(e); }
     n++; $('barI').style.width = (n / todo.length * 100) + '%'; render();
   }
   const failed = items.filter(i => i.state === 'fail').length;
-  if (failed) show('err', 'Đã gửi ' + okc + ' ảnh, còn ' + failed + ' ảnh lỗi. Bấm "Gửi ảnh" để gửi lại.');
+  if (failed) show('err', 'Đã gửi ' + okc + ' ảnh, còn ' + failed + ' ảnh lỗi. ' + lastErr + ' Bấm "Gửi ảnh" để gửi lại.');
   else {
     show('ok', 'Đã gửi thành công ' + okc + ' ảnh.');
     setTimeout(() => { items = []; $('note').value = ''; $('phone').value = ''; $('company').value = '';$('bar').style.display = 'none'; $('barI').style.width = 0; render(); }, 2500);
